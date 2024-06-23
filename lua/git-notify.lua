@@ -1,11 +1,24 @@
 local uv = vim.uv or vim.loop
 local g = vim.g
 
-local git_notify = {}
+local git_notify_augroup = vim.api.nvim_create_augroup("git_notify", {
+	clear = true,
+})
 local default_config = {
-	poll_interval = 1000 * 60, -- 1 minute
-	poll_events = {},
+	poll = {
+		interval = 1000 * 60, -- 1 minute
+		events = {},
+		only_notify_if_remote_updated = true,
+	},
+	notify_string_formatter = function() end,
 }
+local gn = {
+	config = default_config,
+}
+function gn.configure(new_config)
+	local updated_config = vim.tbl_deep_extend("force", gn.config, new_config)
+	gn.config = updated_config
+end
 
 local function set_interval(interval, callback, timer)
 	local timer = timer or uv.new_timer()
@@ -20,19 +33,34 @@ local function clear_interval(timer)
 	timer:close()
 end
 
-function git_notify.update_remote_status(opts, command_context)
+local BRANCH_UPSTREAM_LENGTH = 1 + #"# branch.upstream "
+local function plural(count, multiple, singular)
+	return count > 1 and (count .. " " .. multiple) or (count .. " " .. singular)
+end
+local notify = vim.schedule_wrap(function(...)
+	vim.notify(...)
+end)
+function gn.default_notify_formatter(git_info)
+	local upstream_branch = git_info.upstream_branch
+	local commits_ahead = git_info.commits_ahead
+	local commits_behind = git_info.commits_behind
+	if commits_ahead > 0 then
+		return "You are " .. plural(commits_ahead, "commits", "commit") .. " ahead of " .. upstream_branch
+	elseif commits_behind > 0 then
+		return "You are " .. plural(commits_behind, "commits", "commit") .. " behind " .. upstream_branch
+	else
+		return "You are up-to-date with " .. upstream_branch
+	end
+end
+function gn.update_remote_status(opts)
 	opts = opts or {}
-	command_context = command_context or {}
 	vim.system({ "git", "rev-parse", "--is-inside-work-tree" }, {}, function(output)
 		if output.code ~= 0 then
 			return
 		end
 
 		if opts.log then
-			vim.schedule(function()
-				vim.print(output)
-				vim.notify("fetching remote data")
-			end)
+			notify("fetching remote data")
 		end
 
 		vim.system({ "git", "remote", "update" }, {}, function()
@@ -41,41 +69,58 @@ function git_notify.update_remote_status(opts, command_context)
 					return
 				end
 				local lines = vim.split(branch_status_output.stdout, "\n", { plain = true })
-				local has_upstream = lines[3]:sub(1, 1) == "#"
+				local has_upstream = #lines > 4 and lines[3]:sub(1, 1) == "#"
 				if not has_upstream then
+					if opts.log then
+						notify("git_notify: no upstream found", vim.log.levels.WARN)
+					end
 					return
 				end
 
-				local _, _, commits_behind = lines[4]:find("%+(%d) %-(%d+)")
+				local upstream_branch = lines[3]:sub(BRANCH_UPSTREAM_LENGTH)
+				local _, _, commits_ahead, commits_behind = lines[4]:find("%+(%d+) %-(%d+)")
+				commits_ahead = tonumber(commits_ahead)
+				commits_behind = tonumber(commits_behind)
+				local git_info = {
+					upstream_branch = upstream_branch,
+					commits_ahead = commits_ahead,
+					commits_behind = commits_behind,
+				}
+				vim.g.git_notify_info = git_info
 				vim.schedule(function()
-					vim.notify("You are " .. commits_behind .. " commits behind the remote branch")
+					vim.api.nvim_exec_autocmds("User", {
+						pattern = "GitNotifyUpdate",
+						data = git_info,
+					})
 				end)
 			end)
 		end)
 	end)
 end
 
-function git_notify.configure(opts)
-	local config = opts and vim.tbl_deep_extend("force", g.tabnames_config, opts) or g.tabnames_config
-	g.tabnames_config = config
-	return g.tabnames_config
-end
-
-function git_notify.setup(user_config)
-	git_notify.configure(user_config)
-	git_notify.start()
+gn.configure(vim.g.git_notify_config or {})
+function gn.setup(user_config)
+	user_config = user_config or {}
+	gn.configure(user_config)
+	vim.api.nvim_create_autocmd("User", {
+		pattern = "GitNotifyUpdate",
+		callback = function(ctx)
+			vim.notify(gn.default_notify_formatter(ctx.data))
+		end,
+	})
 	vim.api.nvim_create_user_command("GitNotifyCheck", function(ctx)
-		git_notify.update_remote_status({ log = true }, ctx)
+		gn.update_remote_status({ log = true })
 	end, {})
+	gn.start()
 end
 
-function git_notify.start()
-	git_notify.timer = git_notify.timer or vim.uv.new_timer()
-	set_interval(git_notify.config.poll_interval, git_notify.update_remote_status, git_notify.timer)
+function gn.start()
+	gn.timer = gn.timer or vim.uv.new_timer()
+	set_interval(gn.config.poll.interval, gn.update_remote_status, gn.timer)
 end
 
-function git_notify.stop()
-	clear_interval(git_notify.timer)
+function gn.stop()
+	clear_interval(gn.timer)
 end
 
-return git_notify
+return gn
