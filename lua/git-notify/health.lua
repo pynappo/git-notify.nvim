@@ -54,23 +54,22 @@ M.check = function()
 
 	-- check git version
 	local git_version_output = vim.system({ "git", "--version" }, {}, function(version_output) end):wait()
-	if git_version_output.code ~= 0 then
+	if git_version_output.code == 0 then
+		vim.health.ok("git is executable")
+	else
 		vim.health.error(
 			"git-notify: could not execute git --version",
 			"check if git is executable (on $PATH or set `git_executable`)"
 		)
-		return
-	else
-		vim.health.ok("git is executable")
 	end
 	local git_version = vim.version.parse(git_version_output.stdout:sub(#"git version "))
-	if vim.version.lt(git_version or {}, { 2, 13, 0 }) then
+	if vim.version.ge(git_version or {}, { 2, 13, 0 }) then
+		vim.health.ok("git version >= 2.13")
+	else
 		vim.health.error(
 			"git version < 2.13, got " .. gn.git_version.major .. "." .. gn.git_version.minor,
 			"try updating your git version if possible, or file an issue on the github repo for support for older git versions"
 		)
-	else
-		vim.health.ok("git version >= 2.13")
 	end
 end
 
