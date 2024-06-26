@@ -1,7 +1,5 @@
 local uv = vim.uv or vim.loop
-local git_notify_augroup = vim.api.nvim_create_augroup("git_notify", {
-	clear = true,
-})
+local git_notify_augroup
 local notify = vim.schedule_wrap(function(...)
 	vim.notify(...)
 end)
@@ -38,7 +36,7 @@ local gn = {
 gn.config = gn.get_default_config()
 
 function gn.configure(new_config)
-	if not new_config then
+	if not new_config or vim.tbl_isempty(new_config) then
 		return
 	end
 	local updated_config = vim.tbl_deep_extend("force", gn.config, new_config or {})
@@ -138,25 +136,26 @@ function gn.update_remote_status(opts)
 	end)
 end
 
-gn.configure(vim.g.git_notify_config)
-local GIT_VERSION_LENGTH = #"git version "
-function gn.setup(user_config)
-	if vim.fn.has("nvim-0.10.0") == 0 then
-		vim.notify("git-notify currently only supports nvim 0.10 and up", vim.log.levels.ERROR)
-		return
-	end
-	vim.system({ "git", "--version" }, {}, function(version_output)
-		if version_output.code ~= 0 then
-			notify("git-notify: could not execute git --version", vim.log.levels.ERROR)
+-- one-time setup
+vim.api.nvim_create_autocmd("VimEnter", {
+	callback = function()
+		if vim.fn.has("nvim-0.10.0") == 0 then
+			vim.notify("git-notify currently only supports nvim 0.10 and up", vim.log.levels.ERROR)
 			return
 		end
-		gn.git_version = vim.version.parse(version_output.stdout:sub(GIT_VERSION_LENGTH))
-		if vim.version.lt(gn.git_version, { 2, 13, 0 }) then
-			notify("git-notify: expected git v2.13.0, got " .. gn.git_version, vim.log.levels.ERROR)
-		end
-	end)
-	gn.configure(user_config)
+		gn.configure(vim.g.git_notify_config)
+		vim.api.nvim_create_user_command("GitNotifyCheck", function(ctx)
+			gn.update_remote_status({ notify_for_details = true })
+		end, {})
+	end,
+})
 
+function gn.setup(user_config)
+	git_notify_augroup = vim.api.nvim_create_augroup("git_notify", {
+		clear = true,
+	})
+
+	gn.configure(user_config)
 	vim.api.nvim_create_autocmd("User", {
 		group = git_notify_augroup,
 		pattern = "GitNotifySend",
@@ -165,10 +164,7 @@ function gn.setup(user_config)
 		end,
 	})
 
-	vim.api.nvim_create_user_command("GitNotifyCheck", function(ctx)
-		gn.update_remote_status({ notify_for_details = true })
-	end, {})
-	gn.start_polling()
+	gn.start_polling(true)
 end
 
 local function set_interval(interval, callback, timer)
@@ -184,14 +180,20 @@ local function clear_interval(timer)
 	timer:close()
 end
 
-function gn.start_polling()
+function gn.start_polling(silent)
+	if not silent then
+		vim.notify("git-notify: Starting background polling")
+	end
 	gn.timer = gn.timer or vim.uv.new_timer()
 	set_interval(gn.config.poll.interval, function()
-		gn.update_remote_status({ always_notify = gn.config.always_notify_for_details })
+		gn.update_remote_status({ notify_for_details = gn.config.always_notify_for_details })
 	end, gn.timer)
 end
 
-function gn.stop_polling()
+function gn.stop_polling(silent)
+	if not silent then
+		vim.notify("git-notify: Stopping background polling")
+	end
 	clear_interval(gn.timer)
 end
 
