@@ -7,6 +7,7 @@ local notify = vim.schedule_wrap(function(...)
 end)
 
 local default_config = {
+	git_timeout = 1000 * 60 * 5, -- 5 minutes
 	poll = {
 		interval = 1000 * 60, -- 1 minute
 		events = {},
@@ -44,10 +45,31 @@ function gn.configure(new_config)
 	gn.config = updated_config
 end
 
+local function git_command(args)
+	return {
+		gn.config.git_executable or "git",
+		"--no-pager",
+		"--no-optional-locks",
+		"--literal-pathspecs",
+		"-c",
+		"gc.auto=0",
+		unpack(args),
+	}
+end
+
+local function set_timeout(timeout, callback)
+	local timer = uv.new_timer()
+	timer:start(timeout, 0, function()
+		timer:stop()
+		timer:close()
+		callback()
+	end)
+	return timer
+end
 function gn.update_remote_status(opts)
 	opts = opts or {}
 	opts.notify_for_details = opts.notify_for_details or gn.config.always_notify_for_details
-	vim.system({ "git", "rev-parse", "--absolute-git-dir" }, {}, function(git_dir_output)
+	vim.system(git_command({ "rev-parse", "--absolute-git-dir" }), {}, function(git_dir_output)
 		local git_dir = git_dir_output.stdout
 		if git_dir_output.code ~= 0 or not git_dir then
 			if opts.notify_for_details then
@@ -55,11 +77,11 @@ function gn.update_remote_status(opts)
 			end
 			return
 		end
-		vim.system({ "git", "fetch" }, {}, function()
+		vim.system(git_command({ "fetch" }), {}, function()
 			if opts.notify_for_details then
 				notify("git-notify: fetched remote data")
 			end
-			vim.system({ "git", "status", "--porcelain=v2", "--branch" }, {}, function(branch_status_output)
+			vim.system(git_command({ "status", "--porcelain=v2", "--branch" }), {}, function(branch_status_output)
 				if branch_status_output.code ~= 0 then
 					return
 				end
@@ -91,8 +113,7 @@ function gn.update_remote_status(opts)
 					gn.cache[git_dir][branch_oid] = git_info
 					cache_entry = git_info
 					differs_from_cache = true
-				end
-				if not differs_from_cache then
+				else
 					for k, v in pairs(cache_entry) do
 						if v ~= git_info[k] then
 							differs_from_cache = true
