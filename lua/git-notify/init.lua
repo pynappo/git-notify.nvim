@@ -9,7 +9,7 @@ local default_config = {
 	poll = {
 		interval = 1000 * 60, -- 1 minute
 		events = {},
-		always_notify_for_details = true,
+		always_notify_for_details = false,
 	},
 	notify_formatter = function(git_info)
 		local function plural(count, multiple, singular)
@@ -75,9 +75,16 @@ function gn.update_remote_status(opts)
 			end
 			return
 		end
-		vim.system(git_command({ "fetch" }), {}, function()
+		vim.system(git_command({ "fetch" }), {}, function(fetch_output)
+			if fetch_output.code ~= 0 then
+				notify("git-notify: git fetch failed", vim.log.levels.WARN)
+			end
 			if opts.notify_for_details then
-				notify("git-notify: fetched remote data")
+				if vim.print(fetch_output.stdout) == "" then
+					notify("git-notify: no new data from remote")
+				else
+					notify("git-notify: fetched remote data")
+				end
 			end
 			vim.system(git_command({ "status", "--porcelain=v2", "--branch" }), {}, function(branch_status_output)
 				if branch_status_output.code ~= 0 then
