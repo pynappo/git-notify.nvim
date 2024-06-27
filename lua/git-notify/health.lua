@@ -42,7 +42,7 @@ M.check = function()
 			"table",
 		},
 		["poll.always_notify"] = {
-			gn.config.poll.always_notify,
+			gn.config.poll.always_notify_for_details,
 			"boolean",
 		},
 	})

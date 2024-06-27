@@ -9,7 +9,7 @@ local default_config = {
 	poll = {
 		interval = 1000 * 60, -- 1 minute
 		events = {},
-		always_notify = true,
+		always_notify_for_details = true,
 	},
 	notify_formatter = function(git_info)
 		local function plural(count, multiple, singular)
