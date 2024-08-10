@@ -24,7 +24,7 @@ local default_config = {
 		local commits_behind = git_info.commits_behind
 		if commits_ahead > 0 then
 			if commits_behind > 0 then
-				return ("You are %s ahead, %s behind of %s"):format(
+				return ("You are %s ahead, %s behind %s"):format(
 					auto_plural(commits_ahead, "commits", "commit"),
 					auto_plural(commits_behind, "commits", "commit"),
 					upstream_branch
@@ -32,7 +32,7 @@ local default_config = {
 			end
 			return ("You are %s ahead of %s"):format(auto_plural(commits_ahead, "commits", "commit"), upstream_branch)
 		elseif commits_behind > 0 then
-			return ("You are %s behind of %s"):format(auto_plural(commits_behind, "commits", "commit"), upstream_branch)
+			return ("You are %s behind %s"):format(auto_plural(commits_behind, "commits", "commit"), upstream_branch)
 		else
 			return "You are up-to-date with " .. upstream_branch
 		end
