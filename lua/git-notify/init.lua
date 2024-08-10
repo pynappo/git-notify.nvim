@@ -8,20 +8,31 @@ local default_config = {
 	git_timeout = 1000 * 60 * 5, -- 5 minutes
 	poll = {
 		interval = 1000 * 60, -- 1 minute
-		events = {},
-		always_notify_for_details = false,
+		events = {}, -- unused but should be for autocmd events
+		always_notify_for_details = false, -- send notifications on what's happening on every poll, mostly for debugging
 	},
+	---@type fun(git_info: table): string
 	notify_formatter = function(git_info)
-		local function plural(count, multiple, singular)
-			return count > 1 and (count .. " " .. multiple) or (count .. " " .. singular)
+		local function auto_plural(count, plural, singular)
+			return count > 1 and (count .. " " .. plural) or (count .. " " .. singular)
 		end
+		-- you can also use:
+		-- git_info.branch_oid is the hash of the upstream branch
+		-- git_info.git_dir is the directory where the git repo originates from
 		local upstream_branch = git_info.upstream_branch
 		local commits_ahead = git_info.commits_ahead
 		local commits_behind = git_info.commits_behind
 		if commits_ahead > 0 then
-			return "You are " .. plural(commits_ahead, "commits", "commit") .. " ahead of " .. upstream_branch
+			if commits_behind > 0 then
+				return ("You are %s ahead, %s behind of %s"):format(
+					auto_plural(commits_ahead, "commits", "commit"),
+					auto_plural(commits_behind, "commits", "commit"),
+					upstream_branch
+				)
+			end
+			return ("You are %s ahead of %s"):format(auto_plural(commits_ahead, "commits", "commit"), upstream_branch)
 		elseif commits_behind > 0 then
-			return "You are " .. plural(commits_behind, "commits", "commit") .. " behind " .. upstream_branch
+			return ("You are %s behind of %s"):format(auto_plural(commits_behind, "commits", "commit"), upstream_branch)
 		else
 			return "You are up-to-date with " .. upstream_branch
 		end
@@ -78,9 +89,13 @@ function gn.update_remote_status(opts)
 		vim.system(git_command({ "fetch" }), {}, function(fetch_output)
 			if fetch_output.code ~= 0 then
 				notify("git-notify: git fetch failed", vim.log.levels.WARN)
+				return
 			end
+			-- vim.schedule(function()
+			-- 	vim.print(fetch_output)
+			-- end)
 			if opts.notify_for_details then
-				if vim.print(fetch_output.stdout) == "" then
+				if fetch_output == "" then
 					notify("git-notify: no new data from remote")
 				else
 					notify("git-notify: fetched remote data")
@@ -94,7 +109,7 @@ function gn.update_remote_status(opts)
 				local has_upstream = #lines > 4 and lines[3]:sub(1, 1) == "#"
 				if not has_upstream then
 					if opts.notify_for_details then
-						notify("git-notify: no upstream found", vim.log.levels.WARN)
+						notify("git-notify: no upstream branch found", vim.log.levels.WARN)
 					end
 					return
 				end
