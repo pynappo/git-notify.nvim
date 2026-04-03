@@ -4,6 +4,7 @@ local notify = vim.schedule_wrap(function(...)
 	vim.notify(...)
 end)
 
+---@class gitnotify.Config
 local default_config = {
 	git_timeout = 1000 * 60 * 5, -- 5 minutes
 	poll = {
@@ -11,7 +12,8 @@ local default_config = {
 		events = {}, -- unused but should be for autocmd events
 		always_notify_for_details = false, -- send notifications on what's happening on every poll, mostly for debugging
 	},
-	---@type fun(git_info: table): string
+	git_executable = "git",
+	---@type fun(git_info: gitnotify.StatusInfo): string
 	notify_formatter = function(git_info)
 		local function auto_plural(count, plural, singular)
 			return count > 1 and (count .. " " .. plural) or (count .. " " .. singular)
@@ -46,6 +48,7 @@ local gn = {
 }
 gn.config = gn.get_default_config()
 
+---@param new_config gitnotify.Config?
 function gn.configure(new_config)
 	if not new_config or vim.tbl_isempty(new_config) then
 		return
@@ -66,18 +69,9 @@ local function git_command(args)
 	}
 end
 
-local function set_timeout(timeout, callback)
-	local timer = uv.new_timer()
-	timer:start(timeout, 0, function()
-		timer:stop()
-		timer:close()
-		callback()
-	end)
-	return timer
-end
 function gn.update_remote_status(opts)
 	opts = opts or {}
-	opts.notify_for_details = opts.notify_for_details or gn.config.always_notify_for_details
+	opts.notify_for_details = opts.notify_for_details or gn.config.poll.always_notify_for_details
 	vim.system(git_command({ "rev-parse", "--absolute-git-dir" }), {}, function(git_dir_output)
 		local git_dir = git_dir_output.stdout
 		if git_dir_output.code ~= 0 or not git_dir then
@@ -91,9 +85,6 @@ function gn.update_remote_status(opts)
 				notify("git-notify: git fetch failed", vim.log.levels.WARN)
 				return
 			end
-			-- vim.schedule(function()
-			-- 	vim.print(fetch_output)
-			-- end)
 			if opts.notify_for_details then
 				if fetch_output == "" then
 					notify("git-notify: no new data from remote")
@@ -118,6 +109,7 @@ function gn.update_remote_status(opts)
 				local upstream_branch = lines[3]:sub(1 + #"# branch.upstream ")
 				local _, _, commits_ahead, commits_behind = lines[4]:find("%+(%d+) %-(%d+)")
 
+				---@class gitnotify.StatusInfo
 				local git_info = {
 					git_dir = git_dir,
 					branch_oid = branch_oid,
@@ -172,6 +164,7 @@ vim.api.nvim_create_autocmd("VimEnter", {
 	end,
 })
 
+---@param user_config gitnotify.Config?
 function gn.setup(user_config)
 	git_notify_augroup = vim.api.nvim_create_augroup("git_notify", {
 		clear = true,
@@ -208,7 +201,7 @@ function gn.start_polling(silent)
 	end
 	gn.timer = gn.timer or vim.uv.new_timer()
 	set_interval(gn.config.poll.interval, function()
-		gn.update_remote_status({ notify_for_details = gn.config.always_notify_for_details })
+		gn.update_remote_status({ notify_for_details = gn.config.poll.always_notify_for_details })
 	end, gn.timer)
 end
 
